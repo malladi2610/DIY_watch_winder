@@ -1,149 +1,98 @@
-// Configuration
-#define CYCLES 5
-#define ROT_R 2  //default 2
-#define ROT_L 2  //default 2
-#define PAUSE_MIN 35  //default 35
-
-// Pins
-#define LED_PIN 5
-
-// Motor
-#define ROT_SPEED 1000
-#define ROT_ACCEL 800
-#define ROT_PAUSE 4000
-#define ROT_STEPS 4096
-
-#include <jled.h>
 #include <AccelStepper.h>
-#include <MultiStepper.h>
 
-AccelStepper winder(8, 8, 10, 9, 11, false);
-JLed pwr_led = JLed(LED_PIN).FadeOn(1000);
+// Define step constant
+#define MotorInterfaceType 4
 
-enum StateType
-{
-  W_HOME,  // 0
-  W_CYCLE, // 1
-  W_RIGHT, // 2
-  W_LEFT,  // 3
-  W_STOP,  // 4
-  W_PAUSE  // 5
-};
+// Define the number of steps per full revolution of the motor
+ const int stepsPerRevolution = 2038;
 
-StateType WState = W_HOME;
-int Rotations = CYCLES;
-int TargetPos = 0;
-long StartTime = 0;
-bool LastMinute = false;
+//const int stepsPerRevolution = 4096;
 
-void setup()
-{
-  Serial.begin(115200);
+// Define the number of steps per turn
+const int stepsPerTurn = stepsPerRevolution / 2; // Adjust this if your motor requires fewer steps per turn
 
-  winder.setMaxSpeed(ROT_SPEED);
-  winder.setAcceleration(ROT_ACCEL);
-  WState = W_HOME;
+// Define the number of turns per cycle
+const int turnsPerCycle = 20; // 10 CW + 10 CCW
 
-  Serial.println("<< Winder: Initializing, moving to home position");
+// Define the number of cycles per day
+const int cyclesPerDay = 40;
+
+// Define the pause duration between cycles (35 minutes in milliseconds)
+const unsigned long pauseDuration = 15UL * 60UL * 1000UL; // 35 minutes
+
+// Create an instance of the stepper motor
+AccelStepper myStepper(MotorInterfaceType, 8, 10, 9, 11);
+
+// Variables to track cycles and turns
+int currentCycle = 0;
+int currentTurn = 0;
+
+void setup() {
+    // Initialize Serial communication for debugging
+    Serial.begin(9600);
+
+    // Set the maximum speed, acceleration, and initial speed
+    myStepper.setMaxSpeed(1000.0);
+    // myStepper.setAcceleration(50.0);
+     myStepper.setAcceleration(800.0);
+    myStepper.setSpeed(1000);
+
+    // Move to the home position (0 steps) when powered up
+    myStepper.setCurrentPosition(0);
+    myStepper.moveTo(0);
+
+    // Initial debug message
+    Serial.println("Watch Winder Initialized.");
 }
 
-void loop()
-{
-  StateType old_state = WState;
+void loop() {
+    if (currentCycle < cyclesPerDay) {
+        Serial.print("Starting Cycle: ");
+        Serial.println(currentCycle + 1);
 
-  switch (WState)
-  {
-  case W_HOME:
-    // Move to home position
-    winder.moveTo(0);
-    while (winder.distanceToGo() != 0)
-    {
-      winder.run();
+        // Perform 10 CW turns
+        for (int i = 0; i < turnsPerCycle / 2; i++) {
+            myStepper.moveTo(myStepper.currentPosition() + stepsPerTurn);
+            while (myStepper.distanceToGo() != 0) {
+                myStepper.run();
+            }
+            Serial.print("CW Turn: ");
+            Serial.println(i + 1);
+        }
+
+        // Perform 10 CCW turns
+        for (int i = 0; i < turnsPerCycle / 2; i++) {
+            myStepper.moveTo(myStepper.currentPosition() - stepsPerTurn);
+            while (myStepper.distanceToGo() != 0) {
+                myStepper.run();
+            }
+            Serial.print("CCW Turn: ");
+            Serial.println(i + 1);
+        }
+
+        // After completing a full cycle, start the pause
+        Serial.println("Cycle Complete. Pausing for 35 minutes...");
+
+        // Disable the stepper motor outputs during the pause
+        myStepper.disableOutputs();
+
+        // Pause for 35 minutes
+        unsigned long startTime = millis();
+        while ((unsigned long)(millis() - startTime) < pauseDuration) {
+            // Do nothing during the pause
+        }
+
+        // Re-enable the stepper motor outputs after the pause
+        myStepper.enableOutputs();
+
+        currentCycle++; // Increment cycle count for the next cycle
     }
-    winder.disableOutputs();
-    WState = W_CYCLE;
-    StartTime = millis();
-    Rotations = CYCLES;
-    break;
 
-  case W_CYCLE:
-    if ((Rotations--) > 0)
-    {
-      Serial.print("## Cycles until Pause: ");
-      Serial.println(Rotations);
-      WState = W_RIGHT;
-      TargetPos -= (ROT_R * ROT_STEPS);
-      winder.moveTo(TargetPos);
+    // After all cycles are completed for the day, reset the counter
+    if (currentCycle >= cyclesPerDay) {
+        Serial.println("All cycles complete for the day.");
+        currentCycle = 0; // Reset cycle count for the next day
     }
-    else
-    {
-      WState = W_STOP;
-    }
-    break; // case W_CYCLE
+}
 
-  case W_RIGHT:
-    if (winder.distanceToGo() != 0)
-    {
-      winder.run();
-    }
-    else
-    {
-      WState = W_LEFT;
-      TargetPos += (ROT_L * ROT_STEPS);
-      winder.moveTo(TargetPos);
-    }
-    break; // case W_RIGHT
 
-  case W_LEFT:
-    if (winder.distanceToGo() != 0)
-    {
-      winder.run();
-    }
-    else
-    {
-      WState = W_CYCLE;
-    }
-    break; // case W_LEFT
-
-  case W_STOP:
-    winder.disableOutputs();
-    StartTime = millis();
-    Serial.println("<< Winder: Stopped, waiting for next cycle");
-    WState = W_PAUSE;
-    break; // case W_STOP
-
-  case W_PAUSE:
-    long temp = millis() - StartTime;
-    long delta = 60L * 1000L;
-
-    // run once, 1 minute before PAUSE_MIN elapses
-    if ((!LastMinute) && (temp > (delta * long(PAUSE_MIN - 1))))
-    {
-      Serial.println("<< Winder: Restarting in 1 minute");
-      LastMinute = true;
-    }
-    // PAUSE_MIN has elapsed
-    else if (temp > (delta * long(PAUSE_MIN)))
-    {
-      LastMinute = false;
-      WState = W_CYCLE;
-      Rotations = CYCLES;
-    }
-    break; // W_PAUSE
-
-  default:
-    winder.disableOutputs();
-    break;
-
-  } // switch
-
-  if (WState != old_state)
-  {
-    Serial.print("-- Changing State: ");
-    Serial.print(old_state);
-    Serial.print(" -> ");
-    Serial.println(WState);
-  }
-
-  pwr_led.Update();
-} // loop
