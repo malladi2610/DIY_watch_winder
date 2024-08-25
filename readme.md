@@ -6,7 +6,7 @@ This project addresses the common issue faced by automatic watches: keeping them
 
 The device has been tested with the Omega Seamaster Diver 300, as shown below.
 
-![The watch](images_and_videos/picture.jpg)
+![The watch](images_and_videos/watch.jpg)
 
 ## The Winder
 
