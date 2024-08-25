@@ -52,7 +52,7 @@ While it takes 2 hours of continuous rotation to achieve 1,600 TPD, such constan
 
 # The Watch Winder in Action
 
-![The watch winder video](images_and_videos/video.mp4)
+![The watch winder video](https://youtu.be/c99zNHs1Llk)
 
 # Resources Utilized
 
